@@ -1,43 +1,69 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, make_response
 import re
-from datetime import datetime, timedelta
+import json
 import os
+
+# --- CONSTANTS ---
+
+SUFFIX = {
+    'Road': 'Rd.', 'Street': 'St.', 'Crescent': 'Cres.', 
+    'Place': 'Pl.', 'Avenue': 'Ave.', 'Lane': 'Ln.', 
+    'Highway': 'Hwy.', 'Way': 'Wy.','Row': 'Rw.', 'Terrace': 'Tce.', 'Drive': 'Dr.'
+}
 
 app = Flask(__name__)
 
-def calculate_date(text, anchor_str, status_str):
-    days_map = {"mon":0, "tue":1, "wed":2, "thu":3, "fri":4, "sat":5, "sun":6}
-    anchor = datetime.strptime(anchor_str, '%Y-%m-%d')
-    status = datetime.strptime(status_str, '%Y-%m-%d')
-    
-    match = re.search(r'(this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)', text.lower())
-    if not match: return None
-    
-    keyword, target_day = match.group(1), match.group(2)[:3]
-    target_idx, anchor_idx = days_map[target_day], anchor.weekday()
+def quick_addr(text):
+    # Fast extraction of address-only components
+    keywords = ["flat", "number", "beside", "suburb"]
 
-    days_ahead = (target_idx - anchor_idx) % 7
-    if days_ahead == 0: days_ahead = 7
+    delimit = re.compile(r'\b(' + '|'.join(keywords) + r')\b', re.I)
+    chunks = list(delimit.finditer(text))
     
-    viewing_date = anchor + timedelta(days=days_ahead)
-    if keyword == "next" and days_ahead <= 3:
-        viewing_date += timedelta(days=7)
+    tokens = {k: "" for k in keywords}
+    for i in range(len(chunks)):
+        start = chunks[i].end()
+        end = chunks[i+1].start() if i + 1 < len(chunks) else len(text)
+        tokens[chunks[i].group(1).lower()] = text[start:end].strip()
 
-    return viewing_date
+    # Formulate Location
+    unit = tokens['flat'].replace(" ", "").upper()
+    numb = tokens['number'].replace(" ", "").upper()
+    location = f"U{unit}/{numb}" if unit else numb
+
+    # Standardise "The" and Suffixes
+    beside = re.sub(r'^the\s+', '', tokens['beside'], flags=re.I)
+
+    full_addr = f"{location} {beside} {tokens['suburb']}"
+    full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
+
+    for full_word, abbrev in SUFFIX.items():
+        full_addr = re.sub(rf'\b{full_word}\b', abbrev, full_addr, flags=re.I)
+    return full_addr
 
 @app.route('/process', methods=['POST'])
-def process():
-    data = request.json
-    res_date = calculate_date(data.get('text', ''), data.get('anchor'), data.get('status'))
-    
-    if not res_date: return jsonify({"error": "No date found"}), 400
-    
-    status_dt = datetime.strptime(data.get('status'), '%Y-%m-%d')
-    if res_date < status_dt:
-        return jsonify({"status": "DELETE"})
+def get_unique_list():
+    try:
+        PassOut = request.get_json(force=True)
 
-    return jsonify({"viewing_date": res_date.strftime('%d/%m/%Y'), "status": "LIVE"})
+        raw = str(PassOut.get('text', '')).strip()
+        
+        # Use a SET for automatic deduplication
+        unique_addresses = set()
+        
+        # Split into individual notes and process
+        for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
+            if 'Content:' in note:
+                body = note.split('Content:', 1)[1]
+                addr = quick_addr(body)
+                if addr:
+                    unique_addresses.add(addr)
+
+        # Return as a sorted list
+        return make_response(json.dumps(sorted(list(unique_addresses))), 200)
+
+    except Exception as e:
+        return make_response(json.dumps({"error": str(e)}), 500)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
