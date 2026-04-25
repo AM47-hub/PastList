@@ -83,11 +83,22 @@ def process():
             
             if len(addr) > 3:
                 unique_addresses.add(addr)
+
         # Return as a sorted list
-        return make_response(json.dumps(sorted(list(unique_addresses))), 200)
+        def sort_by_street(addr):
+            # Split the address take everything from the second token onwards
+
+            parts = addr.split(' ', 1)
+            return parts[1] if len(parts) > 1 else addr
+
+        # Sort using the street name as the key
+        final_list = sorted(list(unique_addresses), key=sort_by_street)
+
+        return make_response(json.dumps(final_list), 200)
 
     except Exception as e:
         return make_response(json.dumps({"error": str(e)}), 500)
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
