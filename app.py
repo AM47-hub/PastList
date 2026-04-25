@@ -24,7 +24,8 @@ app = Flask(__name__)
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def health_check():
-
+    return make_response("Ready", 200)
+    
 def fast_parse(text):
 
     keywords = ["flat", "number", "beside", "suburb"]
