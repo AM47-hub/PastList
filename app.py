@@ -51,7 +51,7 @@ def quick_addr(tokens):
 
     location = f"U{unit}/{numb}" if unit else numb
 
-    beside = re.sub(r'^the\s+', '', tokens.get('beside', ''), flags=re.I)
+    beside = re.sub(r'^the\s+kingsway', 'Kingsway', tokens.get('beside', ''), flags=re.I)
 
     full_addr = f"{location} {beside} {tokens.get('suburb', '')}"
     full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
