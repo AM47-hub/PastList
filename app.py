@@ -5,6 +5,15 @@ import os
 
 # --- CONSTANTS ---
 
+REPAIRS = {
+    'one': '1', 'won': '1', 'two': '2', 'to': '2',
+    'three': '3', 'four': '4', 'for': '4',
+    'five': '5', 'six': '6',
+    'seven': '7', 'eight': '8', 'ate': '8',
+    'nine': '9', 'zero': '0', 'none':'0', 'nill':'0',
+    'dash': '-'
+}
+
 SUFFIX = {
     'Road': 'Rd.', 'Street': 'St.', 'Crescent': 'Cres.', 
     'Place': 'Pl.', 'Avenue': 'Ave.', 'Lane': 'Ln.', 
@@ -13,52 +22,66 @@ SUFFIX = {
 
 app = Flask(__name__)
 
-def quick_addr(text):
-    # Fast extraction of address-only components
+@app.route('/ping', methods=['GET', 'HEAD'])
+def health_check():
+
+def fast_parse(text):
+
     keywords = ["flat", "number", "beside", "suburb"]
 
     delimit = re.compile(r'\b(' + '|'.join(keywords) + r')\b', re.I)
     chunks = list(delimit.finditer(text))
-    
-    tokens = {k: "" for k in keywords}
+
+    raw_vals = {k: "" for k in keywords}
     for i in range(len(chunks)):
         start = chunks[i].end()
-        end = chunks[i+1].start() if i + 1 < len(chunks) else len(text)
-        tokens[chunks[i].group(1).lower()] = text[start:end].strip()
 
-    # Formulate Location
-    unit = tokens['flat'].replace(" ", "").upper()
-    numb = tokens['number'].replace(" ", "").upper()
+        end = chunks[i+1].start() if i + 1 < len(chunks) else len(text)
+
+        raw_vals[chunks[i].group(1).lower()] = text[start:end].strip()
+    return raw_vals
+
+def quick_addr(tokens):
+
+    unit = tokens.get('flat', '').replace(" ", "").upper()
+    numb = tokens.get('number', '').replace(" ", "").upper()
+
     location = f"U{unit}/{numb}" if unit else numb
 
-    # Standardise "The" and Suffixes
-    beside = re.sub(r'^the\s+', '', tokens['beside'], flags=re.I)
+    beside = re.sub(r'^the\s+kingsway', 'Kingsway', tokens.get('beside', ''), flags=re.I)
 
-    full_addr = f"{location} {beside} {tokens['suburb']}"
+    full_addr = f"{location} {beside} {tokens.get('suburb', '')}"
     full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
 
     for full_word, abbrev in SUFFIX.items():
+
         full_addr = re.sub(rf'\b{full_word}\b', abbrev, full_addr, flags=re.I)
     return full_addr
 
 @app.route('/process', methods=['POST'])
-def get_unique_list():
+def process():
     try:
         PassOut = request.get_json(force=True)
 
-        raw = str(PassOut.get('text', '')).strip()
+        raw = str(PassOut.get('text', '')).replace('\xa0', ' ').strip()
         
-        # Use a SET for automatic deduplication
+        # Use a set for simple deduplication
         unique_addresses = set()
-        
-        # Split into individual notes and process
-        for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
-            if 'Content:' in note:
-                body = note.split('Content:', 1)[1]
-                addr = quick_addr(body)
-                if addr:
-                    unique_addresses.add(addr)
 
+        for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
+
+            body = note.split('Content:', 1)[1]
+
+            # Apply your REPAIRS logic
+            for word, digit in REPAIRS.items():
+                body = re.sub(rf'\b{word}\b', digit, body, flags=re.I)
+            
+            # Parse and Construct
+            tokens = fast_parse(body)
+            addr = quick_addr(tokens)
+            
+            if addr:
+                unique_addresses.add(addr)
         # Return as a sorted list
         return make_response(json.dumps(sorted(list(unique_addresses))), 200)
 
