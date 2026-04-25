@@ -24,11 +24,16 @@ app = Flask(__name__)
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def health_check():
+
     return make_response("Ready", 200)
-    
+
 def fast_parse(text):
 
-    keywords = ["flat", "number", "beside", "suburb"]
+    keywords = [
+        "flat", "number", "beside", "suburb", "type", "rent", "rooms", 
+        "available", "viewing", "from", "until", "agency", 
+        "person", "mobile", "comments"
+    ]
 
     delimit = re.compile(r'\b(' + '|'.join(keywords) + r')\b', re.I)
     chunks = list(delimit.finditer(text))
@@ -36,20 +41,17 @@ def fast_parse(text):
     raw_vals = {k: "" for k in keywords}
     for i in range(len(chunks)):
         start = chunks[i].end()
-
         end = chunks[i+1].start() if i + 1 < len(chunks) else len(text)
-
         raw_vals[chunks[i].group(1).lower()] = text[start:end].strip()
     return raw_vals
 
 def quick_addr(tokens):
-
     unit = tokens.get('flat', '').replace(" ", "").upper()
     numb = tokens.get('number', '').replace(" ", "").upper()
 
     location = f"U{unit}/{numb}" if unit else numb
 
-    beside = re.sub(r'^the\s+kingsway', 'Kingsway', tokens.get('beside', ''), flags=re.I)
+    beside = re.sub(r'^the\s+', '', tokens.get('beside', ''), flags=re.I)
 
     full_addr = f"{location} {beside} {tokens.get('suburb', '')}"
     full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
@@ -63,25 +65,23 @@ def quick_addr(tokens):
 def process():
     try:
         PassOut = request.get_json(force=True)
-
         raw = str(PassOut.get('text', '')).replace('\xa0', ' ').strip()
-        
-        # Use a set for simple deduplication
         unique_addresses = set()
 
         for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
-
             body = note.split('Content:', 1)[1]
 
-            # Apply your REPAIRS logic
+            # 1. Apply your REPAIRS
             for word, digit in REPAIRS.items():
                 body = re.sub(rf'\b{word}\b', digit, body, flags=re.I)
             
-            # Parse and Construct
+            # 2. Parse into tokens (using your established keywords)
             tokens = fast_parse(body)
+            
+            # 3. Construct canonical address string
             addr = quick_addr(tokens)
             
-            if addr:
+            if len(addr) > 3:
                 unique_addresses.add(addr)
         # Return as a sorted list
         return make_response(json.dumps(sorted(list(unique_addresses))), 200)
