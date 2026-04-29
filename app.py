@@ -3,7 +3,7 @@ import re
 import json
 import os
 
-# --- CONSTANTS ---
+# --- GLOBAL CONSTANT BLOCK ---
 
 REPAIRS = {
     'one': '1', 'won': '1', 'two': '2', 'to': '2',
@@ -11,6 +11,7 @@ REPAIRS = {
     'five': '5', 'six': '6',
     'seven': '7', 'eight': '8', 'ate': '8',
     'nine': '9', 'zero': '0', 'none':'0', 'nill':'0',
+    'twenty': '20', 'thirty': '30', 'fourty':'40', 'fifty':'50',
     'dash': '-'
 }
 
@@ -23,12 +24,10 @@ SUFFIX = {
 app = Flask(__name__)
 
 @app.route('/ping', methods=['GET', 'HEAD'])
-def health_check():
-
+def wakeup():
     return make_response("Ready", 200)
 
-def fast_parse(text):
-
+def fast_parse(dictated):
     keywords = [
         "flat", "number", "beside", "suburb", "type", "rent", "rooms", 
         "available", "viewing", "from", "until", "agency", 
@@ -36,28 +35,25 @@ def fast_parse(text):
     ]
 
     delimit = re.compile(r'\b(' + '|'.join(keywords) + r')\b', re.I)
-    chunks = list(delimit.finditer(text))
+    chunks = list(delimit.finditer(dictated))
 
     raw_vals = {k: "" for k in keywords}
     for i in range(len(chunks)):
         start = chunks[i].end()
-        end = chunks[i+1].start() if i + 1 < len(chunks) else len(text)
-        raw_vals[chunks[i].group(1).lower()] = text[start:end].strip()
+        end = chunks[i+1].start() if i + 1 < len(chunks) else len(dictated)
+        raw_vals[chunks[i].group(1).lower()] = dictated[start:end].strip()
     return raw_vals
 
 def quick_addr(tokens):
     unit = tokens.get('flat', '').replace(" ", "").upper()
     numb = tokens.get('number', '').replace(" ", "").upper()
-
     location = f"U{unit}/{numb}" if unit else numb
 
     beside = re.sub(r'^the\s+kingsway', 'Kingsway', tokens.get('beside', ''), flags=re.I)
-
     full_addr = f"{location} {beside} {tokens.get('suburb', '')}"
     full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
 
     for full_word, abbrev in SUFFIX.items():
-
         full_addr = re.sub(rf'\b{full_word}\b', abbrev, full_addr, flags=re.I)
     return full_addr
 
@@ -65,7 +61,9 @@ def quick_addr(tokens):
 def process():
     try:
         PassOut = request.get_json(force=True)
-        raw = str(PassOut.get('text', '')).replace('\xa0', ' ').strip()
+        payload = PassOut.get('dictated', '')
+        raw = str(payload).replace('\xa0', ' ').strip()
+
         unique_addresses = set()
 
         for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
@@ -80,17 +78,14 @@ def process():
             
             # 3. Construct canonical address string
             addr = quick_addr(tokens)
-            
             if len(addr) > 3:
                 unique_addresses.add(addr)
 
         # Return as a sorted list
         def sort_by_street(addr):
             # Split the address take everything from the second token onwards
-
             parts = addr.split(' ', 1)
             return parts[1] if len(parts) > 1 else addr
-
         # Sort using the street name as the key
         final_list = sorted(list(unique_addresses), key=sort_by_street)
 
@@ -101,4 +96,3 @@ def process():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
-
