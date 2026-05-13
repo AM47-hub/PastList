@@ -4,23 +4,32 @@ import json
 import os
 
 # --- GLOBAL CONSTANT BLOCK ---
-
-REPAIRS = {
+# Digitize Natural Language
+CARDINALS = {
     'one': '1', 'won': '1', 'two': '2', 'to': '2',
     'three': '3', 'four': '4', 'for': '4',
     'five': '5', 'six': '6',
     'seven': '7', 'eight': '8', 'ate': '8',
-    'nine': '9', 'zero': '0', 'none':'0', 'nill':'0',
+    'nine': '9', 'ten': '10', 'zero': '0', 'none':'0', 'nill':'0',
     'eleven': '11', 'twelve': '12', 'thirteen': '13', 'fourteen': '14',
     'fifteen': '15', 'sixteen': '16', 'seventeen': '17', 'eighteen': '18', 'nineteen': '19',
-    'twenty': '20', 'thirty': '30', 'fourty':'40', 'fifty':'50',
-    'dash': '-', '–': '-', '—': '-'
+    'twenty': '20', 'thirty': '30', 'forty':'40', 'fifty':'50',
+    '\u002d': '-', '\u2010': '-', '\u2011': '-', '\u2012': '-',
+    '\u2013': '-', '\u2014': '-', '\u2212': '-',
+    'dash': '-', '–': '-', '—': '-', 'hyphen': '-'
 }
 
+# Address abbreviations
 SUFFIX = {
     'Road': 'Rd.', 'Street': 'St.', 'Crescent': 'Cres.', 
     'Place': 'Pl.', 'Avenue': 'Ave.', 'Lane': 'Ln.', 
     'Highway': 'Hwy.', 'Way': 'Wy.','Row': 'Rw.', 'Terrace': 'Tce.', 'Drive': 'Dr.'
+}
+
+KEYWORDS = {
+    "flat", "number", "beside", "suburb", "type", "rent", "rooms", 
+    "available", "viewing", "from", "until", "agency", 
+    "person", "mobile", "comments"
 }
 
 app = Flask(__name__)
@@ -29,27 +38,20 @@ app = Flask(__name__)
 def wakeup():
     return make_response("Ready", 200)
 
-def fast_parse(dictated):
-    keywords = [
-        "flat", "number", "beside", "suburb", "type", "rent", "rooms", 
-        "available", "viewing", "from", "until", "agency", 
-        "person", "mobile", "comments"
-    ]
-
-    delimit = re.compile(r'\b(' + '|'.join(keywords) + r')\b', re.I)
+def initial_parse(dictated):
+    delimit = re.compile(r'\b(' + '|'.join(KEYWORDS) + r')\b', re.I)
     chunks = list(delimit.finditer(dictated))
-
-    raw_vals = {k: "" for k in keywords}
+    raw_vals = {k: "" for k in KEYWORDS}
     for i in range(len(chunks)):
         start = chunks[i].end()
         end = chunks[i+1].start() if i + 1 < len(chunks) else len(dictated)
         raw_vals[chunks[i].group(1).lower()] = dictated[start:end].strip()
     return raw_vals
 
-def quick_addr(tokens):
+def repair_addr(tokens):
     unit = tokens.get('flat', '').replace(" ", "").upper()
     numb = tokens.get('number', '').replace(" ", "").upper()
-    
+
     if unit:
         # If 'flat' starts with number, add the "U"
         if unit[0].isdigit():
@@ -59,6 +61,7 @@ def quick_addr(tokens):
     else:
         location = numb
 
+    # Standardize 'beside' tokens
     beside = re.sub(r'^the\s+kingsway', 'Kingsway', tokens.get('beside', ''), flags=re.I)
     full_addr = f"{location} {beside} {tokens.get('suburb', '')}"
     full_addr = re.sub(r'\s+', ' ', full_addr).strip().title()
@@ -73,21 +76,21 @@ def process():
         PassOut = request.get_json(force=True)
         payload = PassOut.get('dictated', '')
         raw = str(payload).replace('\xa0', ' ').strip()
-
+        
+        # Use a set for simple deduplication
         unique_addresses = set()
 
+        # Split into individual notes then process
         for note in [s.strip() for s in raw.split('|') if 'Content:' in s]:
             body = note.split('Content:', 1)[1]
 
-            # 1. Apply your REPAIRS
-            for word, digit in REPAIRS.items():
+            # Global Cardinal Repairs
+            for word, digit in CARDINALS.items():
                 body = re.sub(rf'\b{word}\b', digit, body, flags=re.I)
-            
-            # 2. Parse into tokens (using your established keywords)
-            tokens = fast_parse(body)
-            
-            # 3. Construct canonical address string
-            addr = quick_addr(tokens)
+            # Parse into tokens
+            tokens = initial_parse(body)
+            # Construct canonical address string
+            addr = repair_addr(tokens)
             if len(addr) > 3:
                 unique_addresses.add(addr)
 
